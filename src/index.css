@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-primary: #30568b;
+  --color-denim-ink: #1A2B44;
+  --color-raw-silk: #F9F7F2;
+  --color-tailor-gray: #707070;
+  --color-secondary-gold: #735c00;
+  --color-secondary-gold-light: #fed65b;
+  --color-tertiary-cream: #EFE6D4;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--color-raw-silk);
+    color: #1b1b1b;
+  }
+}
+
+/* Custom fade transitions */
+.fade-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 300ms, transform 300ms;
+}
+
+/* Waveform pulse animation */
+@keyframes audio-pulse {
+  0%, 100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.wave-bar {
+  animation: audio-pulse 1.2s ease-in-out infinite;
+}
+
+/* Hide webkit scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

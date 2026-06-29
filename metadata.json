@@ -1,0 +1,6 @@
+{
+  "name": "Jackie Jeans Onboarding",
+  "description": "Smart Fit Onboarding including a manual Fit Quiz and an AI Voice Stylist experience.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
