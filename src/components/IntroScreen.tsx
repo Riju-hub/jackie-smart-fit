@@ -13,7 +13,7 @@ export default function IntroScreen({ onStartManual, onStartVoice }: IntroScreen
       <header className="fixed top-0 w-full bg-raw-silk/80 backdrop-blur-md z-50 flex justify-between items-center px-6 h-16 border-b border-tailor-gray/10">
         <div className="w-8">
           <button className="text-primary hover:scale-105 active:scale-95 transition-all">
-            <span className="text-xl font-semibold">✕</span>
+            <span className="text-xl font-semibold"></span>
           </button>
         </div>
         <h1 className="font-sans text-xl font-extrabold tracking-tight text-denim-ink uppercase">

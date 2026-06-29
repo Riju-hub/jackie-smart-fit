@@ -9,6 +9,176 @@ interface VoiceStylistProps {
   onBackToHome: () => void;
 }
 
+// Helper functions for client-side robust voice parsing
+const parseHeightText = (lower: string): string => {
+  if (lower.includes("skip")) return "5'6\"";
+
+  const wordNumbers: Record<string, number> = {
+    "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "zero": 0, "one": 1, "two": 2, "three": 3
+  };
+
+  let normalized = lower;
+  for (const [word, val] of Object.entries(wordNumbers)) {
+    normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'g'), String(val));
+  }
+
+  // Match something like "5 8" or "5'8" or "5ft8" or "5 foot 8" or "5.8"
+  const match = normalized.match(/(\d+)\s*[\s'ft\-]*\s*(\d+)?/);
+  if (match) {
+    const ft = match[1];
+    const inch = match[2] || "0";
+    const ftNum = parseInt(ft);
+    const inchNum = parseInt(inch);
+    if (ftNum >= 4 && ftNum <= 6) {
+      if (inchNum >= 0 && inchNum <= 12) {
+        return `${ft}'${inch}"`;
+      }
+    }
+  }
+  return "5'6\"";
+};
+
+const parseWeightText = (lower: string): string => {
+  if (lower.includes("skip") || lower.includes("no") || lower.includes("don't") || lower.includes("not tell") || lower.includes("private")) {
+    return "skipped";
+  }
+  const numMatch = lower.match(/\d+/);
+  if (numMatch) {
+    return `${numMatch[0]} lbs`;
+  }
+  return "140 lbs";
+};
+
+const parseMeasurementText = (lower: string, isWaist: boolean): string => {
+  const numMatch = lower.match(/\d+/);
+  let num = numMatch ? parseInt(numMatch[0]) : null;
+  if (isWaist) {
+    if (!num || num < 24 || num > 52) num = 28;
+    return `${num}"`;
+  } else {
+    if (!num || num < 32 || num > 60) num = 36;
+    return `${num}"`;
+  }
+};
+
+const parseChoiceText = (lower: string, options: string[]): string => {
+  if (!options || options.length === 0) return lower;
+  
+  for (const opt of options) {
+    if (lower.includes(opt.toLowerCase())) {
+      return opt;
+    }
+  }
+  
+  if (options.includes("Slightly relaxed")) {
+    if (lower.includes("slightly") || lower.includes("semi") || lower.includes("moderate")) return "Slightly relaxed";
+    if (lower.includes("relaxed") || lower.includes("loose") || lower.includes("roomy")) return "Relaxed";
+    if (lower.includes("snug") || lower.includes("tight") || lower.includes("fit")) return "Snug";
+  }
+  
+  if (options.includes("High rise")) {
+    if (lower.includes("high") || lower.includes("above") || lower.includes("belly")) return "High rise";
+    if (lower.includes("low") || lower.includes("below") || lower.includes("hip")) return "Low rise";
+    if (lower.includes("mid") || lower.includes("medium") || lower.includes("normal")) return "Mid rise";
+  }
+  
+  if (options.includes("Fitted")) {
+    if (lower.includes("fitted") || lower.includes("tight") || lower.includes("slim") || lower.includes("skinny")) return "Fitted";
+    if (lower.includes("loose") || lower.includes("wide") || lower.includes("baggy")) return "Loose";
+    if (lower.includes("relaxed") || lower.includes("straight") || lower.includes("comfort")) return "Relaxed";
+  }
+  
+  if (options.includes("Waist gap")) {
+    if (lower.includes("gap") || lower.includes("waist")) return "Waist gap";
+    if (lower.includes("hip") || lower.includes("tight")) return "Hip tightness";
+    if (lower.includes("length") || lower.includes("short") || lower.includes("long")) return "Wrong length";
+    if (lower.includes("thigh")) return "Thigh fit";
+    if (lower.includes("rise")) return "Rise";
+    if (lower.includes("other") || lower.includes("else")) return "Other";
+  }
+  
+  return options[0];
+};
+
+const parseBrandsText = (lower: string, options: string[]): string => {
+  for (const opt of options) {
+    if (lower.includes(opt.toLowerCase())) {
+      return opt;
+    }
+  }
+  return "Levi's";
+};
+
+const parseBrandSizeText = (lower: string): string => {
+  const numMatch = lower.match(/\d+/);
+  return numMatch ? numMatch[0] : "28";
+};
+
+const findClosestOption = (parsed: string, options: string[]): string => {
+  if (!options || options.length === 0) return parsed;
+  if (options.includes(parsed)) return parsed;
+  const clean = (s: string) => s.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  const cleanedParsed = clean(parsed);
+  const bestMatch = options.find(opt => clean(opt) === cleanedParsed || clean(opt).includes(cleanedParsed) || cleanedParsed.includes(clean(opt)));
+  return bestMatch || options[0];
+};
+
+const getVoiceParseClientFallback = (text: string, questionId: string, options: string[] | undefined) => {
+  const lower = text.toLowerCase().trim();
+  let matchedValue = "";
+  let confirmationSpeech = "";
+
+  if (questionId === "height") {
+    matchedValue = parseHeightText(lower);
+    if (options && options.length > 0) {
+      matchedValue = findClosestOption(matchedValue, options);
+    }
+    confirmationSpeech = `Perfect, ${matchedValue}. Next, what is your weight? Or you can say skip.`;
+  } else if (questionId === "weight") {
+    matchedValue = parseWeightText(lower);
+    if (matchedValue === "skipped") {
+      confirmationSpeech = "Okay, skipping weight. What is your waist measurement in inches?";
+    } else {
+      confirmationSpeech = `Got it, ${matchedValue}. What is your waist measurement in inches?`;
+    }
+  } else if (questionId === "waist" || questionId === "hips") {
+    const isWaist = questionId === "waist";
+    matchedValue = parseMeasurementText(lower, isWaist);
+    if (options && options.length > 0) {
+      matchedValue = findClosestOption(matchedValue, options);
+    }
+    if (isWaist) {
+      confirmationSpeech = `Got it, waist size is ${matchedValue}. And how about your hip measurement in inches?`;
+    } else {
+      confirmationSpeech = `Noted, hip size is ${matchedValue}. Next, how do you like jeans to fit at the waist? Snug, slightly relaxed, or relaxed?`;
+    }
+  } else if (questionId === "waistFit") {
+    matchedValue = parseChoiceText(lower, options || []);
+    confirmationSpeech = `Fabulous, ${matchedValue} fit. Where should the waistband sit? High rise, mid rise, or low rise?`;
+  } else if (questionId === "waistbandSit") {
+    matchedValue = parseChoiceText(lower, options || []);
+    confirmationSpeech = `Perfect, a ${matchedValue}. How should jeans fit through the thighs? Fitted, relaxed, or loose?`;
+  } else if (questionId === "thighFit") {
+    matchedValue = parseChoiceText(lower, options || []);
+    confirmationSpeech = `Wonderful, ${matchedValue} thighs. Which denim brands have you bought before? Levi's, Everlane, Madewell, Zara?`;
+  } else if (questionId === "brands") {
+    matchedValue = parseBrandsText(lower, options || []);
+    confirmationSpeech = `Got it, you wear ${matchedValue}. What size did you buy in those brands?`;
+  } else if (questionId === "brandSizes") {
+    matchedValue = parseBrandSizeText(lower);
+    confirmationSpeech = `Perfect, size ${matchedValue}. Lastly, what is your biggest fit frustration when buying jeans? Waist gap, hip tightness, wrong length, thigh fit, or rise?`;
+  } else if (questionId === "fitFrustration") {
+    matchedValue = parseChoiceText(lower, options || []);
+    confirmationSpeech = `Got it, ${matchedValue} is the worst. Calculating your premium fit profile now!`;
+  } else {
+    matchedValue = options && options.length > 0 ? options[0] : text;
+    confirmationSpeech = `Got it. Moving to the next step.`;
+  }
+
+  return { matchedValue, confirmationSpeech };
+};
+
 interface ChatMessage {
   id: string;
   sender: "ai" | "user";
@@ -31,6 +201,21 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const currentQuestion = QUIZ_QUESTIONS[currentQuestionIndex];
+
+  const getSuggestedOptions = () => {
+    if (currentQuestion.options && currentQuestion.options.length > 0) {
+      return currentQuestion.options;
+    }
+    if (currentQuestion.id === "weight") {
+      return ["Skip Weight", "110 lbs", "120 lbs", "130 lbs", "140 lbs", "150 lbs", "160 lbs", "170 lbs", "180 lbs", "190 lbs", "200 lbs"];
+    }
+    if (currentQuestion.id === "brandSizes") {
+      return ["24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "36"];
+    }
+    return [];
+  };
+
+  const suggestedOptions = getSuggestedOptions();
 
   // Refs to avoid stale closures in event listeners
   const handleVoiceInputRef = useRef<any>(null);
@@ -288,15 +473,12 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
 
   const handleFallbackMapping = (text: string) => {
     // Fallback logic for when server endpoints are not fully processed/mocked
-    const value = currentQuestion.options ? currentQuestion.options[0] : text;
-    updateProfileWithParsedValue(currentQuestion.id, value);
+    const { matchedValue, confirmationSpeech } = getVoiceParseClientFallback(text, currentQuestion.id, currentQuestion.options);
+    updateProfileWithParsedValue(currentQuestion.id, matchedValue);
 
     const nextIndex = currentQuestionIndex + 1;
-    let fallbackSpeech = "";
 
     if (nextIndex < QUIZ_QUESTIONS.length) {
-      const nextQuestion = QUIZ_QUESTIONS[nextIndex];
-      fallbackSpeech = `Got it, noted "${value}". Next: ${nextQuestion.label}`;
       setCurrentQuestionIndex(nextIndex);
 
       setMessages(prev => [
@@ -304,24 +486,24 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
         {
           id: "fallback-" + Date.now(),
           sender: "ai",
-          text: fallbackSpeech,
+          text: confirmationSpeech,
           isConfirmed: true
         }
       ]);
 
-      setTimeout(() => speakText(fallbackSpeech), 500);
+      setTimeout(() => speakText(confirmationSpeech), 500);
     } else {
-      fallbackSpeech = "Spectacular, I've gathered all your fit proportions. Let me calculate your tailored Jackie profile now!";
+      const finishText = "Spectacular, I've gathered all your fit proportions. Let me calculate your tailored Jackie profile now!";
       setMessages(prev => [
         ...prev,
         {
           id: "fallback-" + Date.now(),
           sender: "ai",
-          text: fallbackSpeech,
+          text: finishText,
           isConfirmed: true
         }
       ]);
-      speakText(fallbackSpeech);
+      speakText(finishText);
       setTimeout(() => {
         onComplete();
       }, 3000);
@@ -408,6 +590,68 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
             </p>
           </div>
         </div>
+
+        {/* Suggested options clickable chips */}
+        {suggestedOptions && suggestedOptions.length > 0 && (
+          <div className="mb-6 flex flex-col items-center z-20 animate-fade-in">
+            <span className="font-mono text-[9px] text-tailor-gray uppercase tracking-widest mb-2 block font-semibold">
+              {currentQuestion.id === "brands" ? "SELECT BRANDS (TAP MULTIPLE, THEN CONFIRM)" : "SUGGESTED CHOICES (SAY OR TAP)"}
+            </span>
+            <div className="flex flex-wrap gap-1.5 justify-center max-h-[140px] overflow-y-auto py-1 px-2 no-scrollbar">
+              {suggestedOptions.map((opt) => {
+                const isSelected = (() => {
+                  if (currentQuestion.id === "brands") {
+                    return profile.brands.includes(opt);
+                  }
+                  if (currentQuestion.id === "brandSizes") {
+                    const primaryBrand = profile.brands[0] || "Levi's";
+                    return profile.brandSizes[primaryBrand] === opt;
+                  }
+                  return (profile as any)[currentQuestion.id] === opt;
+                })();
+
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    id={`opt-${opt.replace(/[^a-zA-Z0-9]/g, "-")}`}
+                    onClick={() => {
+                      if (currentQuestion.id === "brands") {
+                        const isSel = profile.brands.includes(opt);
+                        const newBrands = isSel 
+                          ? profile.brands.filter(b => b !== opt) 
+                          : [...profile.brands, opt];
+                        onChangeProfile({ ...profile, brands: newBrands });
+                      } else {
+                        handleVoiceInput(opt);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border shadow-xs transition-all active:scale-95 cursor-pointer ${
+                      isSelected
+                        ? "bg-primary text-white border-primary"
+                        : "bg-white text-denim-ink hover:text-primary border-tailor-gray/10 hover:border-primary/30"
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+            </div>
+            {currentQuestion.id === "brands" && (
+              <button
+                type="button"
+                id="btn-confirm-brands"
+                onClick={() => {
+                  const brandsSelected = profile.brands.join(", ");
+                  handleVoiceInput(brandsSelected || "None");
+                }}
+                className="mt-3 bg-[#1b1b1b] hover:bg-primary text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                Confirm selected brands ({profile.brands.length})
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Dialogue Scroll View */}
         <div className="flex-grow overflow-y-auto no-scrollbar space-y-4 max-h-[35vh]">
