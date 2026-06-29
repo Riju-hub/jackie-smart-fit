@@ -136,17 +136,30 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
+    let fallbackTriggered = false;
+    const triggerFallback = () => {
+      if (!fallbackTriggered) {
+        fallbackTriggered = true;
+        activeUtteranceRef.current = null;
+        startListening();
+      }
+    };
+
+    // Safety timeout: Speech synthesis often fails silently or gets blocked by iframe/browser security policies
+    const speechTimeout = setTimeout(() => {
+      console.warn("SpeechSynthesis safety timeout triggered");
+      triggerFallback();
+    }, Math.max(5000, text.length * 80)); // 80ms per character, minimum 5 seconds
+
     utterance.onend = () => {
-      activeUtteranceRef.current = null;
-      // Auto-start listening after AI finishes speaking
-      startListening();
+      clearTimeout(speechTimeout);
+      triggerFallback();
     };
 
     utterance.onerror = (e) => {
       console.warn("SpeechSynthesis error:", e);
-      activeUtteranceRef.current = null;
-      // Recover and auto-start listening
-      startListening();
+      clearTimeout(speechTimeout);
+      triggerFallback();
     };
 
     synthRef.current.speak(utterance);
