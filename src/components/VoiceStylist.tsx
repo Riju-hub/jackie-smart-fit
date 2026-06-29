@@ -28,6 +28,7 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
   const recognitionRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   const currentQuestion = QUIZ_QUESTIONS[currentQuestionIndex];
 
@@ -38,7 +39,7 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
 
   useEffect(() => {
     handleVoiceInputRef.current = handleVoiceInput;
-  }, [currentQuestionIndex, profile]); // Re-bind when question index or profile state changes
+  }); // Re-bind on every single render to be absolutely fresh
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -61,10 +62,12 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
       rec.lang = "en-US";
 
       rec.onstart = () => {
+        isListeningRef.current = true;
         setIsListening(true);
       };
 
       rec.onend = () => {
+        isListeningRef.current = false;
         setIsListening(false);
       };
 
@@ -79,6 +82,7 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
 
       rec.onerror = (err: any) => {
         console.warn("Speech recognition error:", err);
+        isListeningRef.current = false;
         setIsListening(false);
       };
 
@@ -121,6 +125,8 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
     synthRef.current.cancel(); // Stop any currently speaking speech
 
     const utterance = new SpeechSynthesisUtterance(text);
+    activeUtteranceRef.current = utterance; // Keep a reference to prevent garbage collection!
+
     // Prefer friendly natural voice
     const voices = synthRef.current.getVoices();
     const englishVoice = voices.find(v => v.lang.startsWith("en") && v.name.includes("Google")) || voices.find(v => v.lang.startsWith("en"));
@@ -131,7 +137,15 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
     utterance.pitch = 1.0;
 
     utterance.onend = () => {
+      activeUtteranceRef.current = null;
       // Auto-start listening after AI finishes speaking
+      startListening();
+    };
+
+    utterance.onerror = (e) => {
+      console.warn("SpeechSynthesis error:", e);
+      activeUtteranceRef.current = null;
+      // Recover and auto-start listening
       startListening();
     };
 
@@ -142,6 +156,8 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
     if (recognitionRef.current && !isListeningRef.current && !isProcessingRef.current) {
       try {
         recognitionRef.current.start();
+        isListeningRef.current = true;
+        setIsListening(true);
       } catch (e) {
         console.warn(e);
       }
@@ -150,13 +166,21 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
 
   const stopListening = () => {
     if (recognitionRef.current && isListeningRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+        isListeningRef.current = false;
+        setIsListening(false);
+      } catch (e) {
+        console.warn(e);
+      }
     }
   };
 
   // Process User Input (Spoken or Typed)
   const handleVoiceInput = async (spokenText: string) => {
-    if (isProcessing) return;
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    setIsProcessing(true);
 
     // Add to chat feed
     const userMsgId = Date.now().toString();
@@ -169,7 +193,6 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
       }
     ]);
 
-    setIsProcessing(true);
     setTranscriptText(spokenText);
 
     try {
@@ -186,7 +209,7 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
 
       const data = await response.json();
 
-      if (data.matchedValue) {
+      if (data && data.matchedValue) {
         // Map value to profile
         updateProfileWithParsedValue(currentQuestion.id, data.matchedValue);
 
@@ -218,12 +241,16 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
             onComplete();
           }, 3000);
         }
+      } else {
+        console.warn("No matched value returned, using fallback mapping");
+        handleFallbackMapping(spokenText);
       }
     } catch (e) {
       console.error("Failed to parse input:", e);
       // Fallback: manually map if offline/error
       handleFallbackMapping(spokenText);
     } finally {
+      isProcessingRef.current = false;
       setIsProcessing(false);
       setTranscriptText("");
     }
@@ -251,23 +278,40 @@ export default function VoiceStylist({ profile, onChangeProfile, onComplete, onB
     const value = currentQuestion.options ? currentQuestion.options[0] : text;
     updateProfileWithParsedValue(currentQuestion.id, value);
 
-    const fallbackSpeech = `Got it, I've noted down that fit choice. Let's move to the next question.`;
-    setMessages(prev => [
-      ...prev,
-      {
-        id: "fallback-" + Date.now(),
-        sender: "ai",
-        text: fallbackSpeech,
-        isConfirmed: true
-      }
-    ]);
-
     const nextIndex = currentQuestionIndex + 1;
+    let fallbackSpeech = "";
+
     if (nextIndex < QUIZ_QUESTIONS.length) {
+      const nextQuestion = QUIZ_QUESTIONS[nextIndex];
+      fallbackSpeech = `Got it, noted "${value}". Next: ${nextQuestion.label}`;
       setCurrentQuestionIndex(nextIndex);
+
+      setMessages(prev => [
+        ...prev,
+        {
+          id: "fallback-" + Date.now(),
+          sender: "ai",
+          text: fallbackSpeech,
+          isConfirmed: true
+        }
+      ]);
+
       setTimeout(() => speakText(fallbackSpeech), 500);
     } else {
-      onComplete();
+      fallbackSpeech = "Spectacular, I've gathered all your fit proportions. Let me calculate your tailored Jackie profile now!";
+      setMessages(prev => [
+        ...prev,
+        {
+          id: "fallback-" + Date.now(),
+          sender: "ai",
+          text: fallbackSpeech,
+          isConfirmed: true
+        }
+      ]);
+      speakText(fallbackSpeech);
+      setTimeout(() => {
+        onComplete();
+      }, 3000);
     }
   };
 
